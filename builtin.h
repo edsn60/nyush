@@ -7,8 +7,4 @@
 
 #endif //OS_LAB2_BUILTIN_H
 
-void cd_(char **saved_str);
-void fg_(char **saved_str);
-int exit_(char **saved_str);
-void jobs_(char **saved_str);
 int builtin_handler(char *command);

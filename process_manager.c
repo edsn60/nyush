@@ -14,6 +14,10 @@ extern struct SuspendedJobs *suspended_jobs_list_tail;
 extern char *current_job_command;
 
 
+/** Handle the suspended jobs
+ *
+ * @param pgid:: the ID of the process group that needs to be handled
+ */
 void child_process_signal_handler(pid_t pgid){
 
     suspended_jobs_list_tail->next = (struct SuspendedJobs*) malloc(sizeof(struct SuspendedJobs));
@@ -32,12 +36,17 @@ void child_process_signal_handler(pid_t pgid){
 }
 
 
+/** Handle the suspended but then continued jobs
+ *
+ * @param infop:: the struct '''siginfo_t'''
+ * @param jobid:: the id of the suspended job
+ */
 void continued_job_handler(siginfo_t *infop, int jobid){
     struct SuspendedJobs *suspended_job = suspended_jobs_list_head->next;
     while (suspended_job){
-        if (suspended_job->jobID == jobid){
+        if (suspended_job->jobID == jobid){ // find the job
             printf("si_code: %d, si_signo: %d, si_status: %d, si_pid: %d, pgid: %d\n", infop->si_code, infop->si_signo, infop->si_status, infop->si_pid, suspended_job->Pgid);
-            if (infop->si_code == CLD_EXITED || infop->si_code == CLD_KILLED){
+            if (infop->si_code == CLD_EXITED || infop->si_code == CLD_KILLED){  // if exited or killed
                 kill(-(suspended_job->Pgid), SIGKILL);
                 if (suspended_jobs_list_tail == suspended_job){
                     suspended_jobs_list_tail = suspended_jobs_list_tail->pre;
@@ -49,7 +58,7 @@ void continued_job_handler(siginfo_t *infop, int jobid){
                 }
                 free(suspended_job);
             }
-            else if (infop->si_code == CLD_STOPPED){
+            else if (infop->si_code == CLD_STOPPED){    // if stopped again
                 kill(-(suspended_job->Pgid), SIGTSTP);
                 printf("[%d]  Stopped   %s\n", suspended_job->jobID, suspended_job->command);
             }

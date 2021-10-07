@@ -5,9 +5,7 @@
 #include <string.h>
 #include <signal.h>
 #include <unistd.h>
-#include <sys/stat.h>
 #include <stdlib.h>
-#include <sys/fcntl.h>
 #include <ctype.h>
 
 #include "builtin.h"
@@ -17,12 +15,11 @@
 extern struct SuspendedJobs *suspended_jobs_list_head;
 
 
-/**
- *
+/** builtin command, to continue a suspended job by sending SIGCONT to its process group
  *
  * @param saved_str:: Storing the remaining command, used in '''strtok_r()'''
  */
-void fg_(char **saved_str){
+static void fg_(char **saved_str){
     if (!*saved_str){
         fprintf(stderr, "Error: invalid command\n");
         return;
@@ -42,7 +39,7 @@ void fg_(char **saved_str){
     }
     struct SuspendedJobs *suspended_job = suspended_jobs_list_head->next;
     while (suspended_job){
-        if (suspended_job->jobID == idx){
+        if (suspended_job->jobID == idx){   // find the job
             break;
         }
         suspended_job = suspended_job->next;
@@ -52,7 +49,7 @@ void fg_(char **saved_str){
         return;
     }
     printf("pgid: %d\n", suspended_job->Pgid);
-    kill(-(suspended_job->Pgid), SIGCONT);
+    kill(-(suspended_job->Pgid), SIGCONT);  // continue the job
     tcsetpgrp(STDOUT_FILENO, suspended_job->Pgid);
     tcsetpgrp(STDIN_FILENO, suspended_job->Pgid);
     siginfo_t *infop = (siginfo_t*) malloc(sizeof(siginfo_t));
@@ -61,18 +58,17 @@ void fg_(char **saved_str){
 
     tcsetpgrp(STDOUT_FILENO, getpgid(getpid()));
     tcsetpgrp(STDIN_FILENO, getpgid(getpid()));
-    continued_job_handler(infop, suspended_job->jobID);
+    continued_job_handler(infop, suspended_job->jobID); // it may exit normally or abnormally, or stopped again
 }
 
 
-/**
- * Check if there's' any currently suspended suspended jobs before exit
+/** Check if there's' any currently suspended suspended jobs before exit
  *
  * @param saved_str:: Storing the remaining command, used in '''strtok_r()'''
  * @return:: -1, if there's any currently suspended suspended jobs
  *            0, if no suspended single_command_jobs
  */
-int exit_(char **saved_str){
+static int exit_(char **saved_str){
     if (*saved_str){
         fprintf(stderr, "Error: invalid command");
         return -1;
@@ -85,12 +81,11 @@ int exit_(char **saved_str){
 }
 
 
-/**
- * Print all the suspended single_command_jobs
+/** Print all the suspended jobs
  *
  * @param saved_str:: Storing the remaining command, used in '''strtok_r()'''
  */
-void jobs_(char **saved_str){
+static void jobs_(char **saved_str){
     if (*saved_str){
         fprintf(stderr, "Error: invalid command\n");
         return;
@@ -106,29 +101,15 @@ void jobs_(char **saved_str){
     }
 }
 
-/**
- * Implementation of '''cd''', check if there's no argument and if the path exists
- *       If either fails then print an error message to '''stderr''', otherwise, call '''chdir()'''
+/** Implementation of builtin command '''cd''', call '''chdir()''' to see if it is a valid directory
+ *
  * @param saved_str:: Storing the remaining command, used in '''strtok_r()'''
  */
-void cd_(char **saved_str){
+static void cd_(char **saved_str){
     char *dest = strtok_r(NULL, " ", saved_str);
-    if(access(dest, 0) == -1){
+    if (chdir(dest) == -1){
         fprintf(stderr, "Error: invalid directory\n");
         return;
-    }
-    else{
-        struct stat buf;
-        int flag = open(dest, O_RDONLY);
-        fstat(flag, &buf);
-        if(!S_ISDIR(buf.st_mode)){
-            fprintf(stderr, "Error: invalid directory\n");
-            return;
-        }
-        else{
-            chdir(dest);
-            return;
-        }
     }
 }
 
@@ -137,9 +118,8 @@ void cd_(char **saved_str){
  *
  * @param program:: The name of the cmdname
  * @param saved_str:: Storing the remaining command, used in '''strtok_r()'''
- * @return:: 1, if not builtin
- *           2, if is builtin and executed, no matter succeeded or failed
- *           0, if exit successfully
+ * @return::  1, executed builtin command, not matter a success or a failure
+ *            0, if exit successfully
  *           -1, if exit failed.
  */
 int builtin_handler(char *command){
@@ -160,8 +140,5 @@ int builtin_handler(char *command){
     else if (strcmp(program, "fg") == 0){
         fg_(&saved_str);
     }
-    else{
-        return 1;
-    }
-    return 2;
+    return 1;
 }

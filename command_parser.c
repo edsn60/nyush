@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <sys/fcntl.h>
+
 #include "nyush.h"
 
 extern struct Jobs *jobs_list_head;
@@ -15,17 +16,29 @@ extern struct Jobs *jobs_list_tail;
 extern int isPipe;
 
 
-int isBuiltin(char *program){
-    if (strcmp(program, "cd") == 0 || strcmp(program, "single_command_jobs") == 0 || strcmp(program, "exit") == 0 || strcmp(program, "fg") == 0){
+/** To find out if this command is a builtin command
+ *
+ * @param cmdname:: the command name
+ * @return:: 0, if not builtin
+ *           1, if builtin
+ */
+static int isBuiltin(char *cmdname){
+    if (strcmp(cmdname, "cd") == 0 || strcmp(cmdname, "single_command_jobs") == 0 || strcmp(cmdname, "exit") == 0 || strcmp(cmdname, "fg") == 0){
         return 1;
     }
     return 0;
 }
 
 
-int isValidAbsPath(char *program){
-    if (*program == '/'){
-        if (access(program, X_OK) == 0){
+/** To check if the given command is in the form of an absolute path, for example, "/bin/ls"
+ *
+ * @param cmdname:: the command name
+ * @return:: 0, if not absolute path
+ *           1, if absolute path
+ */
+static int isValidAbsPath(char *cmdname){
+    if (*cmdname == '/'){
+        if (access(cmdname, X_OK) == 0){
             return 1;
         }
         else{
@@ -37,11 +50,18 @@ int isValidAbsPath(char *program){
     }
 }
 
-int isValidRelativePath(char * program){
-    char *relative_path = program;
+
+/** To check if the given command is in the form of a relative path, for example, "dir1/dir2/program"
+ *
+ * @param cmdname:: the command name
+ * @return:: 0, if not a relative path
+ *           1, if a relative path
+ */
+static int isValidRelativePath(char * cmdname){
+    char *relative_path = cmdname;
     while(*relative_path != '\0'){
         if (*relative_path == '/'){
-            if (access(program, X_OK) == 0){
+            if (access(cmdname, X_OK) == 0){
                 return 1;
             }
             else{
@@ -54,19 +74,25 @@ int isValidRelativePath(char * program){
 }
 
 
-char *isValidOtherProgram(char *program){
-    char *bin = (char *) malloc(sizeof(char) * (strlen(program) + 6));
+/** To check if the given command needs to be located in "/bin" and "/usr/bin"
+ *
+ * @param cmdname:: the command name
+ * @return:: NULL, not found in the above two directories
+ *           the found absolute path, if found in the above two directories
+ */
+static char *isValidOtherProgram(char *cmdname){
+    char *bin = (char *) malloc(sizeof(char) * (strlen(cmdname) + 6));
 
     strcpy(bin, "/bin/");
-    strcat(bin, program);
+    strcat(bin, cmdname);
 
     if (access(bin, X_OK) == 0){
         return bin;
     }
     else{
-        char *usrbin = (char *) malloc(sizeof(char) * (strlen(program) + 10));
+        char *usrbin = (char *) malloc(sizeof(char) * (strlen(cmdname) + 10));
         strcpy(usrbin, "/usr/bin/");
-        strcat(usrbin, program);
+        strcat(usrbin, cmdname);
         if (access(usrbin, X_OK) == 0){
             return usrbin;
         }
@@ -76,9 +102,17 @@ char *isValidOtherProgram(char *program){
     }
 }
 
-int isValidDirectProgram(char *program){
-    if (*program == '.' && *(program+1) == '/'){
-        if (access(program, X_OK) == 0){
+
+/** To find out if the given cmdname is an executable file directly under current working directory, for example, "./loop"
+ *
+ * @param cmdname:: the command name
+ * @return::  1, if is and permitted to run the file
+ *           -1, if is but no permission to run the file
+ *            0, if not
+ */
+static int isValidDirectProgram(char *cmdname){
+    if (*cmdname == '.' && *(cmdname + 1) == '/'){
+        if (access(cmdname, X_OK) == 0){
             return 1;
         }
         else{
@@ -91,7 +125,13 @@ int isValidDirectProgram(char *program){
 }
 
 
-int isValidArg_Filename_CmdName(char *arg){
+/** To check the if a filename, cmdname or arg is valid
+ *
+ * @param arg:: a filename, cmdname or arg
+ * @return:: 1, if valid
+ *           0, if not valid
+ */
+static int isValidArg_Filename_CmdName(char *arg){
     for (char *a = arg; *a != '\0' ; a++){
         if (*a == '>' || *a == '<' || *a == '|' || *a == '*' || *a == '!' || *a == '`' || *a == '\'' || *a == '"'){
             return 0;
@@ -100,7 +140,17 @@ int isValidArg_Filename_CmdName(char *arg){
     return 1;
 }
 
-int check_file(char *filename, int flag, int w_flag){
+
+/** To check the if the filename is valid and the file exists
+ *
+ * @param filename:: the name or path of the file
+ * @param flag:: read/write flag, can be '''R_OK''' or '''W_OK'''
+ * @param w_flag:: write mode flag, can be '''O_TRUNC''' or '''O_APPEND'''
+ * @return:: -1, if the file does not exist or have no permission to read/write as required
+ *            0, if filename is not valid
+ *            1, if filename is valid and permitted to read/write
+ */
+static int check_file(char *filename, int flag, int w_flag){
     if (!filename || !isValidArg_Filename_CmdName(filename)){
         return 0;
     }
@@ -119,13 +169,31 @@ int check_file(char *filename, int flag, int w_flag){
 }
 
 
-int terminate(char **command, int w_flag) {
+/** Based on the given description about the grammar, this is the implementation of the terminate block
+ *
+ * @param command:: the input command
+ * @param w_flag:: write mode flag, can be '''O_TRUNC''' or '''O_APPEND'''
+ * @return:: the results of the function '''check_file(...)'''
+ */
+static int terminate(char **command, int w_flag) {
     char *filename = strtok_r(NULL, " ", command);
-    return check_file(filename, W_OK, w_flag);;
+    return check_file(filename, W_OK, w_flag);
 }
 
 
-int cmd_(char **command){
+/** Based on the given description about the grammar, this is the implementation of the cmd block.
+ *      Within this block, the command will be processed into a double linked list (jobs list) with all the necessary information.
+ *      Once this function is called, there will be a new node in the jobs list.
+ *
+ * @param command:: the input command
+ * @return::  1, valid command
+ *            0, invalid command
+ *           -1, invalid file
+ *           -2, invalid program
+ */
+static int cmd_(char **command){
+
+    // create new node
     jobs_list_tail->next = (struct Jobs*) malloc(sizeof(struct Jobs));
     jobs_list_tail->next->pre =jobs_list_tail;
     jobs_list_tail = jobs_list_tail->next;
@@ -139,9 +207,11 @@ int cmd_(char **command){
 
     char *cmdname = strtok_r(NULL, " ", command);
 
-    if (!cmdname || isBuiltin(cmdname) || !isValidArg_Filename_CmdName(cmdname)){
+    if (!cmdname || isBuiltin(cmdname) || !isValidArg_Filename_CmdName(cmdname)){   // check filename
         return 0;
     }
+
+    // locate filename
     if (!isValidAbsPath(cmdname)){
         if (!isValidRelativePath(cmdname)){
             if (!isValidDirectProgram(cmdname)){
@@ -160,12 +230,13 @@ int cmd_(char **command){
     current_job->args = (char**) malloc(sizeof(char*) * 2);
     current_job->args[0] = (char*) malloc(sizeof(char) * (strlen(cmdname) + 1));
     strcpy(current_job->args[0], cmdname);
+
     int args_count = 0;
 
     char *arg = strtok_r(NULL, " ", command);
     while (arg){
-        if (strcmp(arg, "<") == 0){
-            if (isPipe != 0){
+        if (strcmp(arg, "<") == 0){ // if input redirection
+            if (isPipe != 0){   // if not in the first subcommand
                 return 0;
             }
             char *filename = strtok_r(NULL, " ", command);
@@ -174,14 +245,14 @@ int cmd_(char **command){
                 return check_file_status;
             }
             char *operator = strtok_r(NULL, " ", command);
-            if (!operator){
+            if (!operator){     // if terminated
                 return 1;
             }
-            if (strcmp(operator, "|") == 0){
+            if (strcmp(operator, "|") == 0){    // if pipe
                 isPipe++;
                 return cmd_(command);
             }
-            else if (strcmp(operator, ">") == 0 || strcmp(operator, ">>") == 0){
+            else if (strcmp(operator, ">") == 0 || strcmp(operator, ">>") == 0){    // if output redirection
                 int write_flag;
                 if (strcmp(operator, ">") == 0){
                     write_flag = O_TRUNC;
@@ -192,11 +263,11 @@ int cmd_(char **command){
                 return terminate(command ,write_flag);
             }
         }
-        else if (strcmp(arg, "|") == 0){
+        else if (strcmp(arg, "|") == 0){    // if piped
             isPipe++;
             return cmd_(command);
         }
-        else if (strcmp(arg, ">") == 0 || strcmp(arg, ">>") == 0){
+        else if (strcmp(arg, ">") == 0 || strcmp(arg, ">>") == 0){    // if output redirection
             int write_flag;
             if (strcmp(arg, ">") == 0){
                 write_flag = O_TRUNC;
@@ -206,7 +277,7 @@ int cmd_(char **command){
             }
             return terminate(command ,write_flag);
         }
-        else if(!isValidArg_Filename_CmdName(arg)){
+        else if(!isValidArg_Filename_CmdName(arg)){     // if invalid arg
             return 0;
         }
         args_count++;
@@ -221,14 +292,21 @@ int cmd_(char **command){
 }
 
 
-int isValidCommand_(char *command){
+/** To check and process the input command
+ *
+ * @param command:: the input command
+ * @return:: 0, if invalid
+ *           1, if valid but not builtin command
+ *           2, if valid and builtin command
+ */
+int isValidCommand(char *command){
     char *copied_command = (char*) malloc(sizeof(char) * (strlen(command) + 1));
     strcpy(copied_command, command);
     char *saved_command = NULL;
     char *cmd = strtok_r(copied_command, " ", &saved_command);
     char *copied_command1 = (char*) malloc(sizeof(char) * (strlen(command) + 1));
     strcpy(copied_command1, command);
-    if (strcmp(cmd, "cd") == 0 || strcmp(cmd, "fg") == 0){
+    if (strcmp(cmd, "cd") == 0 || strcmp(cmd, "fg") == 0){  // first check if builtin command
         char *arg = strtok_r(NULL, " ", &saved_command);
         if (!arg || saved_command){
             fprintf(stderr, "Error: invalid command\n");
@@ -243,7 +321,7 @@ int isValidCommand_(char *command){
         }
         return 2;
     }
-    int cmd_value = cmd_(&copied_command1);
+    int cmd_value = cmd_(&copied_command1);     // follow the given rule of the grammar
     if (cmd_value == 1){
         char *operator = strtok_r(NULL, " ", &copied_command1);
         if (!operator){

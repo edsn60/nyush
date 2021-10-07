@@ -10,9 +10,9 @@
 #include <termios.h>
 
 #include "nyush.h"
-#include "pipe_.h"
+#include "execute_command.h"
 #include "builtin.h"
-#include "parser.h"
+#include "command_parser.h"
 
 
 struct SuspendedJobs *suspended_jobs_list_head = NULL;
@@ -21,10 +21,14 @@ struct Jobs *jobs_list_head = NULL;
 struct Jobs *jobs_list_tail = NULL;
 char *current_job_command = NULL;
 
-int isPipe = 0;
+
+int isPipe = 0; // pipe flag
 
 
-void free_jobs(){
+/** Empty and free the "jobs_list" except the head node
+ *
+ */
+static void free_jobs(){
     while (jobs_list_tail->pre){
         jobs_list_tail = jobs_list_tail->pre;
         free(jobs_list_tail->next);
@@ -33,8 +37,7 @@ void free_jobs(){
 }
 
 
-/**
- * The shell starts here. First ignore some signals and then check cwd, then prompt the user to input command
+/** The shell starts here. First ignore some signals and then check cwd, then prompt the user to input command
  *      The command will be first preprocessed to delete all leading whitespaces and check if is blank line
  * @return
  */
@@ -84,7 +87,7 @@ int main() {
         }
 
         strcpy(current_job_command, input);
-        int isValid_and_CommandType = isValidCommand_(current_job_command);
+        int isValid_and_CommandType = isValidCommand(current_job_command);
         if (isValid_and_CommandType == 2){
             if (builtin_handler(input) == 0){
                 free_jobs();
