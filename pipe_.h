@@ -7,11 +7,4 @@
 
 #endif //OS_LAB2_PIPE__H
 
-void pipe_parser(char *input);
-
-struct Pipe_job{
-    char job_command[1001];
-    struct Pipe_Subcommand *subcommand_head;
-    int subcommand_count;
-    int PGID;
-};
+void execute_command(struct Jobs *jobs, int isPipe);

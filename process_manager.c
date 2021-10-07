@@ -5,65 +5,56 @@
 #include <string.h>
 #include <dirent.h>
 #include <stdlib.h>
-#include <termios.h>
+#include <signal.h>
 
-#include "pipe_.h"
 #include "nyush.h"
 
-extern struct SuspendedJobs *jobs_list_head;
-extern struct SuspendedJobs *jobs_list_tail;
+extern struct SuspendedJobs *suspended_jobs_list_head;
+extern struct SuspendedJobs *suspended_jobs_list_tail;
 extern char *current_job_command;
-//extern int process_count;
 
 
-void child_process_signal_handler(struct Pipe_job *pipejob, struct Single_Command_Jobs *singlejob){
-//    if (infop->si_code == CLD_EXITED){
-//        printf("[n]+  Exited    %s\n", current_job_command);
-//    }
-//    else if (infop->si_code == CLD_STOPPED){
-    jobs_list_tail->next = (struct SuspendedJobs*) malloc(sizeof(struct SuspendedJobs));
-    jobs_list_tail->next->pre = jobs_list_tail;
-    jobs_list_tail->next->jobID = jobs_list_tail->jobID + 1;
-    jobs_list_tail = jobs_list_tail->next;
-    if (pipejob){
-        jobs_list_tail->Pid = -1;
-        jobs_list_tail->isPipe = 1;
-        jobs_list_tail->Pgid = pipejob->PGID;
-    } else{
-        jobs_list_tail->Pid = singlejob->pid;
-        jobs_list_tail->isPipe = 0;
-        jobs_list_tail->Pgid = singlejob->pgid;
-    }
-    jobs_list_tail->status = CLD_STOPPED;
-    jobs_list_tail->next = NULL;
-    jobs_list_tail->command = (char*) malloc(sizeof(char) * (strlen(current_job_command) + 1));
-    strcpy(jobs_list_tail->command, current_job_command);
-    printf("[%d]+  Stopped    %s\n", jobs_list_tail->jobID, current_job_command);
-//        process_count++;
-//    }
+void child_process_signal_handler(pid_t pgid){
+
+    suspended_jobs_list_tail->next = (struct SuspendedJobs*) malloc(sizeof(struct SuspendedJobs));
+    suspended_jobs_list_tail->next->pre = suspended_jobs_list_tail;
+    suspended_jobs_list_tail->next->jobID = suspended_jobs_list_tail->jobID + 1;
+    suspended_jobs_list_tail = suspended_jobs_list_tail->next;
+
+    suspended_jobs_list_tail->Pgid = pgid;
+
+    suspended_jobs_list_tail->status = CLD_STOPPED;
+    suspended_jobs_list_tail->next = NULL;
+    suspended_jobs_list_tail->command = (char*) malloc(sizeof(char) * (strlen(current_job_command) + 1));
+    strcpy(suspended_jobs_list_tail->command, current_job_command);
+    printf("[%d]+  Stopped    %s\n", suspended_jobs_list_tail->jobID, current_job_command);
+
 }
 
 
 void continued_job_handler(siginfo_t *infop, int jobid){
-    struct SuspendedJobs *job = jobs_list_head->next;
-    while (job){
-        if (job->jobID == jobid){
-            if (infop->si_code == CLD_EXITED){
-                if (jobs_list_tail == job){
-                    jobs_list_tail = jobs_list_tail->pre;
+    struct SuspendedJobs *suspended_job = suspended_jobs_list_head->next;
+    while (suspended_job){
+        if (suspended_job->jobID == jobid){
+            printf("si_code: %d, si_signo: %d, si_status: %d, si_pid: %d, pgid: %d\n", infop->si_code, infop->si_signo, infop->si_status, infop->si_pid, suspended_job->Pgid);
+            if (infop->si_code == CLD_EXITED || infop->si_code == CLD_KILLED){
+                kill(-(suspended_job->Pgid), SIGKILL);
+                if (suspended_jobs_list_tail == suspended_job){
+                    suspended_jobs_list_tail = suspended_jobs_list_tail->pre;
                 }
-                printf("[%d]  Exited   %s\n", job->jobID, job->command);
-                job->pre->next = job->next;
-                if (job->next) {
-                    job->next->pre = job->pre;
+                printf("[%d]  Exited   %s\n", suspended_job->jobID, suspended_job->command);
+                suspended_job->pre->next = suspended_job->next;
+                if (suspended_job->next) {
+                    suspended_job->next->pre = suspended_job->pre;
                 }
-                free(job);
+                free(suspended_job);
             }
             else if (infop->si_code == CLD_STOPPED){
-                printf("[%d]  Stopped   %s\n", job->jobID, job->command);
+                kill(-(suspended_job->Pgid), SIGTSTP);
+                printf("[%d]  Stopped   %s\n", suspended_job->jobID, suspended_job->command);
             }
             break;
         }
-        job = job->next;
+        suspended_job = suspended_job->next;
     }
 }

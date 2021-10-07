@@ -10,50 +10,28 @@
 #include <termios.h>
 
 #include "nyush.h"
-#include "command_parser.h"
-#include "command_check.h"
 #include "pipe_.h"
 #include "builtin.h"
+#include "parser.h"
 
 
-//struct Pipe_Subcommand {
-//    int subcommand_idx;
-//    char *program;
-//    char **args;
-//    int input_fd;
-//    int output_fd;
-//    struct Pipe_Subcommand *next;
-//    struct Pipe_Subcommand *pre;
-//};
-//
-//
-//struct Single_Command_Jobs{
-//    char *program;
-//    char *command;
-//    char **args;
-//    int input_fd;
-//    int output_fd;
-//    int pid;
-//    int pgid;
-//};
-//
-//
-//struct SuspendedJobs{
-//    int jobID;
-//    pid_t Pid;
-//    pid_t Pgid;
-//    int isPipe;
-//    int status;
-//    char *command;
-//    struct SuspendedJobs *next;
-//    struct SuspendedJobs *pre;
-//};
-
-
-struct SuspendedJobs *jobs_list_head = NULL;
-struct SuspendedJobs *jobs_list_tail = NULL;
+struct SuspendedJobs *suspended_jobs_list_head = NULL;
+struct SuspendedJobs *suspended_jobs_list_tail = NULL;
+struct Jobs *jobs_list_head = NULL;
+struct Jobs *jobs_list_tail = NULL;
 char *current_job_command = NULL;
-//int process_count = 0;
+
+int isPipe = 0;
+
+
+void free_jobs(){
+    while (jobs_list_tail->pre){
+        jobs_list_tail = jobs_list_tail->pre;
+        free(jobs_list_tail->next);
+        jobs_list_tail->next = NULL;
+    }
+}
+
 
 /**
  * The shell starts here. First ignore some signals and then check cwd, then prompt the user to input command
@@ -68,17 +46,28 @@ int main() {
     signal(SIGTSTP, SIG_IGN);
     signal(SIGTTIN, SIG_IGN);
     signal(SIGTTOU, SIG_IGN);
-    jobs_list_head = (struct SuspendedJobs*) malloc(sizeof(struct SuspendedJobs));
-    jobs_list_head->jobID = 0;
-    jobs_list_head->pre = NULL;
-    jobs_list_head->next = NULL;
-    jobs_list_tail = jobs_list_head;
+
+    suspended_jobs_list_head = (struct SuspendedJobs*) malloc(sizeof(struct SuspendedJobs));
+    suspended_jobs_list_head->jobID = 0;
+    suspended_jobs_list_head->pre = NULL;
+    suspended_jobs_list_head->next = NULL;
+    suspended_jobs_list_tail = suspended_jobs_list_head;
+
     printf("The default interactive shell is now nyush.\n");
+
     char cwd[300] = {};
+    char input[1001] = {};
     current_job_command = (char*) malloc(sizeof(char) * 1001);
 
-    char input[1001] = {};
+    jobs_list_head = (struct Jobs*) malloc(sizeof(struct Jobs));
+    jobs_list_tail = jobs_list_head;
+    jobs_list_tail->next = NULL;
+    jobs_list_tail->pre = NULL;
+    jobs_list_tail->cmdname = NULL;
+    jobs_list_tail->args = NULL;
+
     while(1){
+
         getcwd(cwd, sizeof(cwd));
         char *basename1 = basename(cwd);
         tcflush(STDERR_FILENO, TCOFLUSH);
@@ -93,29 +82,21 @@ int main() {
         if (strlen(whitespace) == 0){
             continue;
         }
+
         strcpy(current_job_command, input);
-        int is_Valid_or_Piped = isValidCommand(input);
-        if (is_Valid_or_Piped == -1){   // invalid
-            continue;
-        }
-        else if (is_Valid_or_Piped == 1){   // piped
-            pipe_parser(input);
-            continue;
-        }
-        else if (is_Valid_or_Piped == 2){   // builtin
+        int isValid_and_CommandType = isValidCommand_(current_job_command);
+        if (isValid_and_CommandType == 2){
             if (builtin_handler(input) == 0){
-                free(jobs_list_head);
+                free_jobs();
+                free(suspended_jobs_list_head);
                 free(current_job_command);
                 return 0;
             }
         }
-        else{
-            single_command_parser(input);
+        else if (isValid_and_CommandType == 1){
+            execute_command(jobs_list_head->next, isPipe);
         }
-////        if (single_command_parser(input) == 0){
-////            free(jobs_list_head);
-////            free(stp_command);
-////            return 0;
-////        }
+        free_jobs();
+        isPipe = 0;
     }
 }

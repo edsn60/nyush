@@ -44,9 +44,12 @@
 
 # Kernel Module Compile Results
 *.mod*
-*.cmd
+*.cmd_
 .tmp_versions/
 modules.order
 Module.symvers
 Mkfile.old
 dkms.conf
+cmake-build-debug/
+.idea/
+.DS_Store
