@@ -1,8 +1,8 @@
-# OS_Lab2
+# NYUSH
 
 This is a brief description of the project.
 
-## project structure
+## Project Structure
 ```
 nyush
 ├── CMakeLists.txt
@@ -20,40 +20,43 @@ nyush
 └── tree.txt
 ```
 
-## project file description
+## Project File Description
 > ```nyush.c```
->>
->> ```main()```, the shell starts here
+> 
+> The shell starts here. This file contains some initialization code when shell starts.
 >
 > ```nyush.h```
->>  some definition of structs including
->> ```c
->> struct SuspendedJobs;
->> struct Jobs;
->> ```
+>
+> Some definition of structs including
+> ```c
+> struct SuspendedJobs;    // double linked list to store all suspended jobs
+> struct Jobs;     // double linked list to store the current job after each input
+>```
 
 > ```command_parser.c```
->>
+> 
+> This file contains the command parser, it parses the command following the rules given in the lab description.
+> 
+> Plus, it will preprocess the input command for later execution.
 >
-> ```command_parser.h```
->>
+>
 
 > ```builtin.c```
->>
 >
-> ```builtin.h```
->>
+> This contains the implementation of four builtin commands ```cd```, ```jobs```, ```fg```, and ```exit```, 
+> plus a ```builtin_handler()```
+>
 
 > ```execute_command.c```
->>
+> 
+> This code in this file will be responsible for executing non-builtin commands including pipes.
 >
-> ```execute_command.h```
->>
+
 
 > ```process_manager.c```
->>
 >
-> ```process_manager.h```
->>
+> This is the process manager of the shell, it handles all suspended jobs and those suspended before but continued later.
 
 ## Call Graph
+
+![](/Users/apple/CLionProjects/nyush/Call_Graph.png)
