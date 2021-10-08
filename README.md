@@ -17,7 +17,7 @@ nyush
 ├── nyush.h
 ├── process_manager.c
 ├── process_manager.h
-└── tree.txt
+└── Call_Graph.png
 ```
 
 ## Project File Description
