@@ -59,4 +59,4 @@ nyush
 
 ## Call Graph
 
-![](https://github.com/edsn60/nyush/blob/add_readme/Call_Graph.png)
+![](/Users/apple/CLionProjects/nyush/Call_Graph.png)

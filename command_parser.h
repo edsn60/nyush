@@ -6,4 +6,4 @@
 #define OS_LAB2_PARSER_H
 
 #endif //OS_LAB2_PARSER_H
-int isValidCommand(char *command);
+int isValidCommand(char *command, int *isPipe);

@@ -8,4 +8,4 @@
 #endif //OS_LAB2_SIGNAL_HANDLER_H
 
 void child_process_signal_handler(pid_t pgid);
-void continued_job_handler(siginfo_t *infop, pid_t pgid);
+void continued_job_handler(pid_t pgid);

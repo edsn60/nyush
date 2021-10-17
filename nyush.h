@@ -11,7 +11,6 @@
 struct SuspendedJobs{
     int jobID;
     pid_t Pgid;
-    int status;
     char *command;
     struct SuspendedJobs *next;
     struct SuspendedJobs *pre;

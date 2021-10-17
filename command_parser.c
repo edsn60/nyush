@@ -13,9 +13,6 @@ extern struct Jobs *jobs_list_head;
 extern struct Jobs *jobs_list_tail;
 
 
-extern int isPipe;
-
-
 /** To find out if this command is a builtin command
  *
  * @param cmdname:: the command name
@@ -42,7 +39,7 @@ static int isValidAbsPath(char *cmdname){
             return 1;
         }
         else{
-            return -1;
+            return 0;
         }
     }
     else{
@@ -65,7 +62,7 @@ static int isValidRelativePath(char * cmdname){
                 return 1;
             }
             else{
-                return -1;
+                return 0;
             }
         }
         relative_path++;
@@ -116,7 +113,7 @@ static int isValidDirectProgram(char *cmdname){
             return 1;
         }
         else{
-            return -1;
+            return 0;
         }
     }
     else{
@@ -154,17 +151,23 @@ static int check_file(char *filename, int flag, int w_flag){
     if (!filename || !isValidArg_Filename_CmdName(filename)){
         return 0;
     }
-    if (access(filename, flag) == 0){
+    if (access(filename, flag) != 0){
+        if (flag == R_OK){
+            return -1;
+        }
+        else {
+            jobs_list_tail->output_fd = open(filename, O_WRONLY | O_CREAT | w_flag, S_IRUSR | S_IRGRP | S_IWGRP | S_IWUSR);
+            return 1;
+        }
+    }
+    else{
         if (flag == R_OK){
             jobs_list_tail->input_fd = open(filename, O_RDONLY);
         }
         else {
-            jobs_list_tail->output_fd = open(filename, O_WRONLY | O_CREAT | w_flag, S_IRUSR | S_IWUSR | S_IXUSR);
+            jobs_list_tail->output_fd = open(filename, O_WRONLY | O_CREAT | w_flag, S_IRUSR | S_IRGRP | S_IWGRP | S_IWUSR);
         }
         return 1;
-    }
-    else{
-        return -1;
     }
 }
 
@@ -173,11 +176,42 @@ static int check_file(char *filename, int flag, int w_flag){
  *
  * @param command:: the input command
  * @param w_flag:: write mode flag, can be '''O_TRUNC''' or '''O_APPEND'''
+ * @param isPipe:: a flag represents if the command is piped
+ * @param allowed_input_redirect:: number of allowed input redirection
  * @return:: the results of the function '''check_file(...)'''
  */
-static int terminate(char **command, int w_flag) {
+static int terminate(char **command, int w_flag, const int *isPipe, int *allowed_input_redirect) {
     char *filename = strtok_r(NULL, " ", command);
-    return check_file(filename, W_OK, w_flag);
+    char *operator = strtok_r(NULL, " ", command);
+    if (!operator){
+        return check_file(filename, W_OK, w_flag);
+    }
+    else{
+        if (strcmp(operator, "<") != 0){
+            return 0;
+        }
+        else{
+            if (*isPipe != 0 || *allowed_input_redirect != 1){
+                return 0;
+            }
+            else{
+                (*allowed_input_redirect)--;
+                char *filename2 = strtok_r(NULL, " ", command);
+                if (*command && strlen(*command) != 0){
+                    return 0;
+                }
+                int checkfile1 = check_file(filename, W_OK, w_flag);
+                if (checkfile1 != 1){
+                    return checkfile1;
+                }
+                int checkfile2 = check_file(filename2, R_OK, 0);
+                if (checkfile2 != 1){
+                    return checkfile2;
+                }
+            }
+        }
+    }
+    return 1;
 }
 
 
@@ -186,13 +220,22 @@ static int terminate(char **command, int w_flag) {
  *      Once this function is called, there will be a new node in the jobs list.
  *
  * @param command:: the input command
+ * @param isPipe:: a flag represents if the command is piped
+ * @param allowed_input_redirect:: number of allowed input redirection
+ * @param allowed_output_redirect:: number of allowed output redirection
  * @return::  1, valid command
  *            0, invalid command
  *           -1, invalid file
  *           -2, invalid program
  */
-static int cmd_(char **command){
+static int cmd_(char **command, int *isPipe, int *allowed_input_redirect, int *allowed_output_redirect){
+    if (!*command){
+        return 0;
+    }
 
+    int cmd_return_value = 1;
+    int terminate_return_value = 1;
+    int check_file_status = 1;
     // create new node
     jobs_list_tail->next = (struct Jobs*) malloc(sizeof(struct Jobs));
     jobs_list_tail->next->pre =jobs_list_tail;
@@ -207,26 +250,11 @@ static int cmd_(char **command){
 
     char *cmdname = strtok_r(NULL, " ", command);
 
-    if (!cmdname || isBuiltin(cmdname) || !isValidArg_Filename_CmdName(cmdname)){   // check filename
+    if (!cmdname || strlen(cmdname) == 0 || isBuiltin(cmdname) || !isValidArg_Filename_CmdName(cmdname)){   // check filename
         return 0;
     }
 
-    // locate filename
-    if (!isValidAbsPath(cmdname)){
-        if (!isValidRelativePath(cmdname)){
-            if (!isValidDirectProgram(cmdname)){
-                if (!isValidOtherProgram(cmdname)){
-                    return -2;
-                }
-                else{
-                    cmdname = isValidOtherProgram(cmdname);
-                }
-            }
-        }
-    }
 
-    current_job->cmdname = (char*) malloc(sizeof(char) * (strlen(cmdname) + 1));
-    strcpy(current_job->cmdname, cmdname);
     current_job->args = (char**) malloc(sizeof(char*) * 2);
     current_job->args[0] = (char*) malloc(sizeof(char) * (strlen(cmdname) + 1));
     strcpy(current_job->args[0], cmdname);
@@ -234,25 +262,30 @@ static int cmd_(char **command){
     int args_count = 0;
 
     char *arg = strtok_r(NULL, " ", command);
-    while (arg){
+    while (arg && strlen(arg) != 0){
         if (strcmp(arg, "<") == 0){ // if input redirection
-            if (isPipe != 0){   // if not in the first subcommand
+            if (*isPipe != 0 || *allowed_input_redirect != 1){   // if not in the first subcommand
                 return 0;
             }
             char *filename = strtok_r(NULL, " ", command);
-            int check_file_status = check_file(filename, R_OK, 0);
-            if (check_file_status <= 0){
-                return check_file_status;
-            }
+            check_file_status = check_file(filename, R_OK, 0);
+            (*allowed_input_redirect)--;
             char *operator = strtok_r(NULL, " ", command);
-            if (!operator){     // if terminated
-                return 1;
+            if (!operator || strlen(operator) == 0){     // if terminated
+                break;
             }
             if (strcmp(operator, "|") == 0){    // if pipe
-                isPipe++;
-                return cmd_(command);
+                (*isPipe)++;
+                cmd_return_value = cmd_(command, isPipe, allowed_input_redirect, allowed_output_redirect);
+                break;
             }
             else if (strcmp(operator, ">") == 0 || strcmp(operator, ">>") == 0){    // if output redirection
+                if (*allowed_output_redirect != 1){
+                    return 0;
+                } else{
+                    (*allowed_output_redirect)--;
+                }
+
                 int write_flag;
                 if (strcmp(operator, ">") == 0){
                     write_flag = O_TRUNC;
@@ -260,14 +293,26 @@ static int cmd_(char **command){
                 else{
                     write_flag = O_APPEND;
                 }
-                return terminate(command ,write_flag);
+                terminate_return_value = terminate(command ,write_flag, isPipe, allowed_input_redirect);
+                if (terminate_return_value <= 0){
+                    return terminate_return_value;
+                }
+                break;
+            }
+            else{
+                return 0;
             }
         }
         else if (strcmp(arg, "|") == 0){    // if piped
-            isPipe++;
-            return cmd_(command);
+            (*isPipe)++;
+            cmd_return_value = cmd_(command, isPipe, allowed_input_redirect, allowed_output_redirect);
+            break;
         }
         else if (strcmp(arg, ">") == 0 || strcmp(arg, ">>") == 0){    // if output redirection
+            if (*allowed_output_redirect != 1){
+                return 0;
+            }
+            (*allowed_output_redirect)--;
             int write_flag;
             if (strcmp(arg, ">") == 0){
                 write_flag = O_TRUNC;
@@ -275,7 +320,9 @@ static int cmd_(char **command){
             else{
                 write_flag = O_APPEND;
             }
-            return terminate(command ,write_flag);
+            terminate_return_value = terminate(command ,write_flag, isPipe, allowed_input_redirect);
+            break;
+
         }
         else if(!isValidArg_Filename_CmdName(arg)){     // if invalid arg
             return 0;
@@ -288,6 +335,32 @@ static int cmd_(char **command){
     }
     current_job->args[args_count+1] = NULL;
 
+
+    if (cmd_return_value == 0 || terminate_return_value == 0 || check_file_status == 0){
+        return 0;
+    }
+    if (cmd_return_value == -2){
+        return -2;
+    }
+    // locate filename
+    if (!isValidAbsPath(cmdname)){
+        if (!isValidDirectProgram(cmdname)){
+            if (!isValidRelativePath(cmdname)){
+                if (!isValidOtherProgram(cmdname)){
+                    return -2;
+                }
+                else{
+                    cmdname = isValidOtherProgram(cmdname);
+                }
+            }
+        }
+    }
+    if (cmd_return_value == -1 || terminate_return_value == -1 || check_file_status == -1){
+        return -1;
+    }
+
+    current_job->cmdname = (char*) malloc(sizeof(char) * (strlen(cmdname) + 1));
+    strcpy(current_job->cmdname, cmdname);
     return 1;
 }
 
@@ -295,11 +368,16 @@ static int cmd_(char **command){
 /** To check and process the input command
  *
  * @param command:: the input command
+ * @param isPipe:: a flag represents if the command is piped
  * @return:: 0, if invalid
  *           1, if valid but not builtin command
  *           2, if valid and builtin command
  */
-int isValidCommand(char *command){
+int isValidCommand(char *command, int *isPipe){
+
+    int allowed_input_redirect = 1;
+    int allowed_output_redirect = 1;
+
     char *copied_command = (char*) malloc(sizeof(char) * (strlen(command) + 1));
     strcpy(copied_command, command);
     char *saved_command = NULL;
@@ -308,26 +386,26 @@ int isValidCommand(char *command){
     strcpy(copied_command1, command);
     if (strcmp(cmd, "cd") == 0 || strcmp(cmd, "fg") == 0){  // first check if builtin command
         char *arg = strtok_r(NULL, " ", &saved_command);
-        if (!arg || saved_command){
+        if (!arg || (saved_command && strcmp(saved_command, "") != 0)){
             fprintf(stderr, "Error: invalid command\n");
             return 0;
         }
         return 2;
     }
     else if (strcmp(cmd, "exit") == 0 || strcmp(cmd, "jobs") == 0){
-        if (saved_command){
+        if (saved_command && strcmp(saved_command, "") != 0){
             fprintf(stderr, "Error: invalid command\n");
             return 0;
         }
         return 2;
     }
-    int cmd_value = cmd_(&copied_command1);     // follow the given rule of the grammar
+    int cmd_value = cmd_(&copied_command1, isPipe, &allowed_input_redirect, &allowed_output_redirect);     // follow the given rule of the grammar
     if (cmd_value == 1){
         char *operator = strtok_r(NULL, " ", &copied_command1);
-        if (!operator){
+        if (!operator || strlen(operator) == 0){
             return 1;
         }
-        else if (strcmp(operator, "<") == 0 && isPipe == 0){
+        else if (strcmp(operator, "<") == 0 && *isPipe == 0 && allowed_input_redirect == 1){
             char *filename = strtok_r(NULL, " ", &copied_command1);
             return check_file(filename, R_OK, 0);
         }

@@ -56,11 +56,10 @@ int main() {
     suspended_jobs_list_head->next = NULL;
     suspended_jobs_list_tail = suspended_jobs_list_head;
 
-    printf("The default interactive shell is now nyush.\n");
-
-    char cwd[300] = {};
-    char input[1001] = {};
+    char *cwd = (char*) malloc(sizeof(char) * 400);
+    char *input = (char*) malloc(sizeof(char) * 1001);
     current_job_command = (char*) malloc(sizeof(char) * 1001);
+    size_t len = sizeof(char) * 1001;
 
     jobs_list_head = (struct Jobs*) malloc(sizeof(struct Jobs));
     jobs_list_tail = jobs_list_head;
@@ -68,15 +67,20 @@ int main() {
     jobs_list_tail->pre = NULL;
     jobs_list_tail->cmdname = NULL;
     jobs_list_tail->args = NULL;
-
     while(1){
 
-        getcwd(cwd, sizeof(cwd));
+        getcwd(cwd, sizeof(char) * 400);
         char *basename1 = basename(cwd);
-        tcflush(STDERR_FILENO, TCOFLUSH);
         printf("[nyush %s]$ ", basename1);
-        gets(input);
-
+        fflush(stdout);
+        size_t read_size = getline(&input, &len, stdin);
+        if (feof(stdin)){
+            printf("\n");
+            exit(0);
+        }
+        if (input[read_size-1] == '\n'){
+            input[read_size-1] = '\0';
+        }
         char *whitespace = input;
 
         while(*whitespace == ' '){
@@ -87,7 +91,7 @@ int main() {
         }
 
         strcpy(current_job_command, input);
-        int isValid_and_CommandType = isValidCommand(current_job_command);
+        int isValid_and_CommandType = isValidCommand(current_job_command, &isPipe);
         if (isValid_and_CommandType == 2){
             if (builtin_handler(input) == 0){
                 free_jobs();

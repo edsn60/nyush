@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <ctype.h>
+#include<sys/wait.h>
 
 #include "builtin.h"
 #include "process_manager.h"
@@ -20,13 +21,9 @@ extern struct SuspendedJobs *suspended_jobs_list_head;
  * @param saved_str:: Storing the remaining command, used in '''strtok_r()'''
  */
 static void fg_(char **saved_str){
-    if (!*saved_str){
-        fprintf(stderr, "Error: invalid command\n");
-        return;
-    }
     int idx = 0;
     char *str_idx = strtok_r(NULL, " ", saved_str);
-    for (char *c = str_idx; *c; c++){
+    for (char *c = str_idx; *c && *c != '\0'; c++){
         if (isdigit(*c) == 0){
             fprintf(stderr, "Error: invalid job\n");
             return;
@@ -48,31 +45,36 @@ static void fg_(char **saved_str){
         fprintf(stderr, "Error: invalid job\n");
         return;
     }
-    printf("pgid: %d\n", suspended_job->Pgid);
-    kill(-(suspended_job->Pgid), SIGCONT);  // continue the job
     tcsetpgrp(STDOUT_FILENO, suspended_job->Pgid);
     tcsetpgrp(STDIN_FILENO, suspended_job->Pgid);
+    kill(-(suspended_job->Pgid), SIGCONT);  // continue the job
     siginfo_t *infop = (siginfo_t*) malloc(sizeof(siginfo_t));
-
-    waitid(P_PGID, suspended_job->Pgid, infop, WEXITED | WSTOPPED);
-
+    int exit_status = 0;
+    while (waitid(P_PGID, suspended_job->Pgid, infop, WEXITED | WSTOPPED) != -1){
+        if (infop->si_code == CLD_STOPPED){    // stopped again
+            kill(-(suspended_job->Pgid), SIGTSTP);
+            exit_status = 1;
+            break;
+        }
+        else if (infop->si_code == CLD_KILLED || infop->si_code == CLD_DUMPED){    // killed or terminated abnormally
+            kill(-(suspended_job->Pgid), SIGKILL);
+            break;
+        }
+    }
+    if (exit_status == 0){
+        continued_job_handler(suspended_job->jobID);    // if killed or terminated abnormally, delete the job
+    }
     tcsetpgrp(STDOUT_FILENO, getpgid(getpid()));
     tcsetpgrp(STDIN_FILENO, getpgid(getpid()));
-    continued_job_handler(infop, suspended_job->jobID); // it may exit normally or abnormally, or stopped again
 }
 
 
 /** Check if there's' any currently suspended suspended jobs before exit
  *
- * @param saved_str:: Storing the remaining command, used in '''strtok_r()'''
  * @return:: -1, if there's any currently suspended suspended jobs
  *            0, if no suspended single_command_jobs
  */
-static int exit_(char **saved_str){
-    if (*saved_str){
-        fprintf(stderr, "Error: invalid command");
-        return -1;
-    }
+static int exit_(){
     if (suspended_jobs_list_head->next){
         fprintf(stderr, "Error: there are suspended jobs\n");
         return -1;
@@ -83,20 +85,11 @@ static int exit_(char **saved_str){
 
 /** Print all the suspended jobs
  *
- * @param saved_str:: Storing the remaining command, used in '''strtok_r()'''
  */
-static void jobs_(char **saved_str){
-    if (*saved_str){
-        fprintf(stderr, "Error: invalid command\n");
-        return;
-    }
+static void jobs_(){
     struct SuspendedJobs *job = suspended_jobs_list_head->next;
-    char *status;
     while(job){
-        if (job->status == CLD_STOPPED){
-            status = "Stopped";
-        }
-        printf("[%d] %s    %s\n", job->jobID, status, job->command);
+        printf("[%d] %s\n", job->jobID, job->command);
         job = job->next;
     }
 }
@@ -129,10 +122,10 @@ int builtin_handler(char *command){
         cd_(&saved_str);
     }
     else if (strcmp(program, "jobs") == 0){
-        jobs_(&saved_str);
+        jobs_();
     }
     else if (strcmp(program, "exit") == 0){
-        if (exit_(&saved_str) == 0){
+        if (exit_() == 0){
             return 0;   // exit successfully
         }
         return -1;  // exit failed

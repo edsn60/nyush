@@ -5,15 +5,12 @@
 #include <unistd.h>
 #include <signal.h>
 #include <stdlib.h>
+#include<sys/wait.h>
 
 #include "process_manager.h"
 #include "nyush.h"
 
 extern struct SuspendedJobs *suspended_jobs_list_tail;
-
-// CLD_STOPPED == 5
-//CLD_EXITED == 1
-//CLD_KILLED == 2
 
 
 /** To execute the job command, no matter it is piped or not
@@ -74,10 +71,12 @@ void execute_command(struct Jobs *jobs, int isPipe){
             signal(SIGTTOU, SIG_DFL);
             signal(SIGTTIN, SIG_DFL);
             if (input_fd != STDIN_FILENO) {     // input redirection
+
                 dup2(input_fd, STDIN_FILENO);
                 close(input_fd);
             }
             if (output_fd != STDOUT_FILENO) {      // output redirection
+
                 dup2(output_fd, STDOUT_FILENO);
                 close(output_fd);
             }
@@ -102,22 +101,20 @@ void execute_command(struct Jobs *jobs, int isPipe){
     for (int i = 0; i < isPipe * 2; i++){
         close(pipe_fd[i]);
     }
-    for (int i = 0; i < isPipe+1; i++){
-        waitid(P_PGID, pgid, &infop, WEXITED | WSTOPPED);   // wait for any of the child process in a process group
-
+    while (waitid(P_PGID, pgid, &infop, WEXITED | WSTOPPED) != -1){
         if (infop.si_code == CLD_EXITED){
-            if (infop.si_status != 0 && infop.si_status != 2){  // if exited abnormally, send SIGKILL to the group
+            if (infop.si_status != 0){  // if exited abnormally, send SIGKILL to the group
                 kill(pgid, SIGKILL);
-                tcsetpgrp(STDIN_FILENO, getpgid(getpid()));
-                tcsetpgrp(STDOUT_FILENO, getpgid(getpid()));
                 break;
             }
         }
         else if (infop.si_code == CLD_STOPPED){    // if stopped, send SIGTSTP to the group and handle suspended job
             kill(pgid, SIGTSTP);
-            tcsetpgrp(STDIN_FILENO, getpgid(getpid()));
-            tcsetpgrp(STDOUT_FILENO, getpgid(getpid()));
             child_process_signal_handler(pgid);
+            break;
+        }
+        else if (infop.si_code == CLD_DUMPED){
+            kill(pgid, SIGKILL);
             break;
         }
     }
